@@ -1,0 +1,4 @@
+curl --header "Accept: application/json Content-Type: application/json;charset=UTF-8" \
+  --request POST \
+  --data '{  "key": "0000",  "blockCount": 5,  "blockLength": 24, "imitoLength":3, "codes":"MDAwMDAwNDYxOTg0ODhKRlU0ODNITEFGMDAwMDAwNDYxOTg0ODhLMVU0ODNITDRRMDAwMDAwNDYxOTg0ODhBMVUzQjNITEFGMDAwMDAwNDYxOTg0ODhHRlU0ODFITEE0MDAwMDAwNDYxOTg0ODhDWFVRODMxTEEz"}'\
+  http://localhost:8085/sign/symmetric

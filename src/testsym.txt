@@ -1,0 +1,11 @@
+POST /sign/symmetric HTTP/1.1
+Content-Length: 10
+Accept: application/json
+Content-Type: application/json;charset=UTF-8
+Host: localhost:8081
+{
+  "key": "0000",
+  "blockCount": 5,
+  "blockLength": 24,
+  "codes": "MDAwMDAwNDYxOTg0ODhKRlU0ODNITEFGMDAwMDAwNDYxOTg0ODhLMVU0ODNITDRRMDAwMDAwNDYxOTg0ODhBMVUzQjNITEFGMDAwMDAwNDYxOTg0ODhHRlU0ODFITEE0MDAwMDAwNDYxOTg0ODhDWFVRODMxTEEz"
+}

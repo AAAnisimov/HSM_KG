@@ -1,0 +1,208 @@
+/*
+ The multithread HSM server. A separate thread is allocated for each connection
+To speed up the work, the use of third-party libraries in highly loaded parts of the implementation is minimized.*/
+
+#include <cstdlib>
+#include <iostream>
+#include <fstream>
+#include <algorithm>
+#include <functional>
+#include <cctype>
+#include <locale>
+#include <chrono>
+#include <thread>
+#include <errno.h>
+#include <string.h>
+#include <map>
+#include <boost/bind.hpp>
+#include <boost/smart_ptr.hpp>
+#include <boost/asio.hpp>
+#include <boost/beast/core.hpp>
+#include <boost/beast.hpp>
+#include <boost/thread/thread.hpp>
+#include <boost/property_tree/ptree.hpp>
+#include <boost/property_tree/json_parser.hpp>
+#include <boost/foreach.hpp>
+#include "Crypt.hpp"
+#include "Base64.h"
+
+namespace http = boost::beast::http;
+
+#define PID_FILE "/var/run/final.pid"
+
+int max_length=4096;
+using boost::asio::ip::tcp;
+std::string Path="",Addr;
+bool Debug=false;
+int port;
+std::ofstream Cerr;
+typedef boost::shared_ptr<tcp::socket> socket_ptr;
+std::map <std::string, int> URIs;
+void session(socket_ptr socket_)
+{
+  URIs["/keys"]=1;
+  URIs["/sign/symmetric"]=2;
+  URIs["/check/codes"]=3;
+  try
+  {
+	boost::system::error_code error;
+	boost::beast::flat_buffer buffer;
+	http::request<http::dynamic_body> req;
+	http::read(socket_, buffer, req);
+	std::string tosend="";
+	if (req.method()!=http::verb::post) //Get method
+	{
+		tosend="HTTP/1.1 404 Not Found\nServer: final\nDate: Mon, 27 Mar 2017 09:22:16 GMT\nContent-Type: text/html\nContent-Length: 162\
+											\nConnection: close\n\n<html>\n<head><title>404 Not Found</title></head>\n<body bgcolor=\"white\">\
+											\n<center><h1>404 Not Found</h1></center>\
+											\n<hr><center>HSM</center>\n</body>\n</html>\n\n";
+
+		Cerr<<getpid()<<"HTTP must be POST!"<<std::endl;
+	}
+	else
+	{
+		std::string GetPath=req.get();
+		if (Debug)
+			Cerr<<getpid()<<" GET PATH="<<GetPath<<std::endl;
+		boost::property_tree::ptree pt;
+		boost::property_tree::read_json(data, pt);
+		if (GetPath!="") 									//Main procedure
+		{
+			switch (URIs[GetPath])
+			{
+			case 1:		//Keys
+				if ((pt.get_child("type").get_value<int>())==2)
+					tosend="HTTP/1.1 200 OK\nContent-Type: application/json;charset=UTF-8\nContent-Length: 3\n{\n  \"keys\": [\"000\"]}\n";
+				else
+					tosend="HTTP/1.1 400 Bad Request\nContent-Type: application/json;charset=UTF-8\nContent-Length: 20\n{\n   \"errorCode\": 106,\"errorText\":\"Подпись неверна\"\n}";
+				break;
+			case 2:		//Symmetric sign
+				if (Debug)
+						Cerr<<getpid()<<"Generating hash"<<std::endl;
+				if ((pt.get_child("keys").get_value<std::string>())!="0000")
+				{
+					if (Debug) Cerr<<getpid()<<"Bad key: "<<pt.get_child("keys").get_value<std::string>()<<std::endl;
+					tosend="HTTP/1.1 400 Bad Request\nContent-Type: application/json;charset=UTF-8\nContent-Length: 20\n{\n   \"errorCode\": 106,\"errorText\":\"Подпись неверна\"\n}";
+				}
+				else
+				{
+					int BlockCount=pt.get_child("blockCount").get_value<int>();
+					int BlockLength=pt.get_child("blockLength").get_value<int>();
+					int ImitoLength=pt.get_child("imitoLength").get_value<int>();
+					std::string Codes=base64_decode(pt.get_child("codes").get_value<std::string>());
+					if (Debug)
+						Cerr<<getpid()<<"Parsing result: \n"<<
+							"\tblockCount: "<<BlockCount<<std::endl<<
+							"\tblockLength: "<<BlockLength<<std::endl<<
+							"\timitoLength: "<<ImitoLength<<std::endl<<
+							"\tcodes: "<<Codes<<std::endl;
+					std::string Hashes="";
+					int Blocks=0;
+					for (unsigned i = 0; i < Codes.length(); i += BlockLength,Blocks++) {
+						Hashes+=hash(Codes.substr(i, BlockLength)).substr(0,ImitoLength);
+					}
+					if (Blocks!=BlockCount)
+					{
+						if (Debug)
+							Cerr<<getpid()<<"Block count error: header="<<BlockCount<<" actual:"<<Blocks<<std::endl;
+						tosend="HTTP/1.1 400 Bad Request\nContent-Type: application/json;charset=UTF-8\nContent-Length: 20\n{\n   \"errorCode\": 106,\"errorText\":\"Количество кодов отличается от заголовка\"\n}";
+					}
+					else
+					{
+						Hashes=base64_encode(Hashes);
+						if (Debug)
+							Cerr<<getpid()<<"Hashes array: ="<<Hashes<<std::endl;
+						tosend="HTTP/1.1 200 OK\nContent-Type: application/json;charset=UTF-8\nContent-Length: "+std::to_string(116+Hashes.length()) +"\n{\n  \"signatures\": \""+base64_encode(Hashes)+"\"\n}";
+						//ToDo: Заполнение ответа
+					}
+				}
+				break;
+			case 3:		//Check codes
+				break;
+			default:	//Error
+				//tosend="HTTP/1.1 400 Bad Request\nContent-Type: application/json;charset=UTF-8\nContent-Length: 33\n{\n\"errorCode\": 106,\n   \"errorText\":\"Неверный формат JSON объекта\"\n}";
+				tosend="HTTP/1.1 404 Not Found\nServer: final\nDate: Mon, 27 Mar 2017 09:22:16 GMT\nContent-Type: text/html\nContent-Length: 162\
+										\nConnection: close\n\n<html>\n<head><title>404 Not Found</title></head>\n<body bgcolor=\"white\">\
+										\n<center><h1>404 Not Found</h1></center>\
+										\n<hr><center>HSM</center>\n</body>\n</html>\n\n";
+				if (Debug)
+					Cerr<<getpid()<<" File not found!!!\n"<<tosend<<std::endl<<getpid()<<" Error opening file:\n" << strerror(errno) << std::endl;
+			}
+		}
+		if (Debug)
+			Cerr<<getpid()<<"Sending result: " << tosend << std::endl;
+		boost::asio::write(*socket_, boost::asio::buffer(tosend.c_str(), (tosend.length()+1)*sizeof(char)));
+		socket_->shutdown(boost::asio::ip::tcp::socket::shutdown_both);
+	}
+  }
+  catch (std::exception& e)
+  {
+    std::cerr << "Exception in thread: " << e.what() << "\n";
+  }
+}
+void server(boost::asio::io_service& io_service, short port)
+{
+  tcp::acceptor a(io_service, tcp::endpoint(boost::asio::ip::address::from_string(Addr), port));
+  for (;;)
+  {
+    socket_ptr sock(new tcp::socket(io_service));
+    a.accept(*sock);
+    boost::thread t(boost::bind(session, sock));
+  }
+}
+
+int main(int argc, char* argv[])
+{
+  try
+  {
+	  int opt;
+	  if ((argc < 6)||(argc > 7))
+	  {
+		  std::cout<<"usage: HSM_KG -h <ip> -p <port> [-d <directory>]\nIf directory is set - all traffic will be saved there";
+		  return -1;
+	  }
+	  while ((opt = getopt(argc, argv, "h:p:d:")) != -1)
+	  {
+		  switch (opt)
+		  {
+		  case 'h':
+			  Addr=optarg;
+			  break;
+		  case 'p':
+			  port = std::atoi(optarg);
+			  break;
+		  case 'd':
+			  Debug=true;
+			  Path=optarg;
+			  break;
+		  default: /* '?' */
+			  Cerr<<"usage: HSM_KG -h <ip> -p <port> -d <directory>\n"<<std::endl;
+			  exit(-1);
+		  }
+	  }
+    if (!fork())
+	{
+    	if (Debug)
+    		Cerr.open(Path,std::ifstream::out);
+    	if (Debug)
+    		 	Cerr<<getpid()<<"HSM: starting on "<<Addr<<":"<<port<<"pid="<<getpid()<<" debug path="<<Path<< std::endl;
+    	umask(0);
+    	setsid();
+    	chdir("/");
+    	unlink(PID_FILE);
+    	std::ofstream sFile;
+    	sFile.open(PID_FILE,std::ios_base::out|std::fstream::app);
+    	sFile<<getpid()<<std::endl;
+    	sFile.close();
+    	boost::asio::io_service io_service;
+		server(io_service, port);
+		unlink(PID_FILE);
+		Cerr.close();
+	}
+  }
+  catch (std::exception& e)
+  {
+    std::cerr << "Exception: " << e.what() << "\n";
+  }
+  return 0;
+}
