@@ -1,0 +1,4 @@
+curl --header "Accept: application/json Content-Type: application/json;charset=UTF-8" \
+  --request POST \
+  --data @./requestSym10k.json \
+  http://localhost:8085/sign/symmetric

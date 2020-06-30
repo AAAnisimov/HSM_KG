@@ -1,0 +1,4 @@
+curl --header "Accept: application/json Content-Type: application/json;charset=UTF-8" \
+  --request POST \
+  --data '{"type": 2 }'\
+  http://localhost:8085/keys
