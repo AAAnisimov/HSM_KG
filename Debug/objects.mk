@@ -4,5 +4,5 @@
 
 USER_OBJS :=
 
-LIBS := -lgcrypt -lboost_system -lpthread -lboost_thread
+LIBS := -lgcrypt -lpthread -lstdc++fs
 
