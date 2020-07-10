@@ -1,5 +1,6 @@
+basetime=$(date +%s%N)
 curl --header "Accept: application/json Content-Type: application/json;charset=UTF-8" \
   --request POST \
-  --http0.9 \
   --data @./request10k-1.json \
   http://localhost:8085/sign/symmetric
+echo "runtime: $(echo "scale=3;($(date +%s%N) - ${basetime})/(1*10^09)" | bc) seconds"

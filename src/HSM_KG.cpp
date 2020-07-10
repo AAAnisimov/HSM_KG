@@ -19,7 +19,7 @@
 #include <cstdlib>
 #include <cerrno>
 #include <strings.h>
-
+#include <fcntl.h>
 #include <unistd.h> // ::close
 
 #include <netdb.h>
@@ -37,6 +37,21 @@ static const char *Err404="HTTP/1.1 404 Not Found\nServer: final\nDate: Mon, 27 
         \nConnection: close\n\n<html>\n<head><title>404 Not Found</title></head>\n<body bgcolor=\"white\">\
         \n<center><h1>404 Not Found</h1></center>\
         \n<hr><center>HSM</center>\n</body>\n</html>\n\n";
+
+
+/** Returns true on success, or false if there was an error */
+int set_nonblock(int fd)
+{
+    int flags;
+#if defined(O_NONBLOCK)
+    if (-1 ==(flags=fcntl(fd,F_GETFL,0)))
+    	flags=0;
+    return fcntl(fd, F_SETFL, flags|O_NONBLOCK);
+#else
+    flags=1;
+    return ioctl(fd,FIOBIO,&flags);
+#endif
+}
 struct Header{
 	Header(std::string Path_="",std::string Body_="", bool HasBody_=false,bool ExpectContinue_=false, std::size_t BodySize_=0):Path(Path_),Body(Body_),HasBody(HasBody_),ExpectContinue(ExpectContinue_),BodySize(BodySize_)
 	{
@@ -139,6 +154,7 @@ class SimpleSocket
             sockaddr_in     cli_addr;
             socklen_t       clilen      = sizeof(cli_addr);
             int             newsockfd   = ::accept(sockfd, reinterpret_cast<sockaddr*>(&cli_addr), &clilen);
+            //set_nonblock(sockfd);
             if (newsockfd < 0)
             {
                 throw std::runtime_error("accept failed");
@@ -175,7 +191,7 @@ class Respomces
 				}
         		else
         		{
-        			return std::make_unique<Job>(sockfd,"HTTP/1.1 200 OK \r\nContent-Type: application/json\r\n","{\"keys\": [\"0000\"] }");
+        			return std::make_unique<Job>(sockfd,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n","{\"keys\": [\"0000\"] }");
         		}
         		break;
         	case 2:         //Symmetric sign
@@ -231,7 +247,7 @@ class Respomces
 						std::cerr<<"\n\tBase64 encoded array: "<<Hashes<<std::endl;
 #endif
 						delete[] HashArray;
-						return std::make_unique<Job>(sockfd,"HTTP/1.1 200 OK \r\nContent-Type: application/json\r\n","{\n  \"signatures\": \""+Hashes+"\"\n}\n");
+						return std::make_unique<Job>(sockfd,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n","{\r\n\t\"signatures\": \""+Hashes+"\"\r\n}\r\n");
 					}
 				}
         		break;
@@ -247,35 +263,80 @@ class Respomces
 /* Copy a buffer to stream */
 void sendToClient(int sockfd, const char* buffer, std::size_t size)
 {
-	//::write(sockfd, buffer , size);
-    std::size_t write = 0;
-    while(write < size)
+    std::size_t writen = 0;
+    int out=0;
+    while(writen < size)
     {
-        int out = ::write(sockfd, buffer + write, size - write);
-        if (out == -1)
-        {
-        	if ((errno != EAGAIN) && (errno != EWOULDBLOCK) & (errno != EINTR))
-        		throw std::runtime_error("Failed to write to socket");
-        }
-        else
-        	write += out;
+        out = ::write(sockfd, buffer + writen, (size - writen>65536)?65536:size - writen);
+        if (out == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR))
+		{
+			continue;
+		}
+		if (out == -1)
+		{
+			throw std::runtime_error("Failed to write to socket");
+		}
+        writen += out;
+#ifdef __DEBUG
+        std::cerr<<"Writing "<<out<<" bytes. "<<writen<<" bytes writen "<<size<<" bytes total).\n";
+#endif
     }
 }
 
 /* Read the request from the socket */
+void ReadBytes(int connection, char *BodyBuf, int Size)
+{
+	int readed=0;
+	while(true)
+		{
+#ifdef __DEBUG
+			std::cerr<<"Reading....  ";
+#endif
+			std::size_t actual = ::read(connection, BodyBuf + readed, Size - readed );
+#ifdef __DEBUG
+			std::cerr<<"Readed chunk: "<<actual<<" bytes, "<<readed+actual<<" bytes total \n";
+			std::cerr<<"Last 50 bytes: "<<&BodyBuf[actual+readed-50]<<std::endl;
+#endif
+			if (actual == 0)
+			{
+				break;
+			}
+			if ((int)actual == -1 && (errno == EAGAIN || errno == EINTR))
+			{
+				continue;
+			}
+			if ((int)actual == -1)
+			{
+				throw std::runtime_error("Read Error");
+			}
+			readed += actual;
+			if (readed == Size)
+			{
+				break;
+			}
+		}
+#ifdef __DEBUG
+	std::cerr<<"Readed: "<<readed<<" bytes \n";
+	std::cerr<<"Last 50 bytes: "<<&BodyBuf[readed-50]<<std::endl;
+#endif
+}
 Header ParceRequest(int connection)
 {
 
     char buffer[4097];
+    memset (buffer,0,4097);
     Header HDR;
     std::size_t readed;
+    int StartPos,HdrEnd;
     readed = ::read(connection, buffer , 4096 );
+#ifdef __DEBUG
+    	std::cerr<<"Header: "<<readed<<" bytes \n";
+#endif
     std::string Hdr=std::string (buffer,buffer+readed);
     std::for_each(Hdr.begin(), Hdr.end(), [](char & c){c = ::toupper(c);});
 #ifdef __DEBUG
     std::cerr<<"Got request\n-----------------------------------\n"<<buffer<<"\n-----------------------------------\n";
 #endif
-    int StartPos;
     StartPos=Hdr.find("POST");
     if ((StartPos<0)||(StartPos>5)) return Header (404,"Wrong metod. The POST is expected at the very beginning of the header.");
     char* DataStart  = buffer+StartPos+5;
@@ -283,12 +344,14 @@ Header ParceRequest(int connection)
     char* DataEnd = buffer+StartPos;
     HDR.Path=std::string(DataStart, DataEnd);
     StartPos=Hdr.find("CONTENT-LENGTH");
+    HdrEnd=Hdr.find("\r\n\r\n",StartPos)+4;
     if (StartPos>0)
     {
     	DataStart  = buffer+StartPos+15;
     	StartPos=Hdr.find("\n",StartPos+15);
     	DataEnd=buffer+StartPos;
     	HDR.BodySize=std::stoi(std::string(DataStart, DataEnd));
+    	HDR.HasBody=true;
     }
     StartPos=Hdr.find("100-CONTINUE");
     if (StartPos==-1)
@@ -296,75 +359,43 @@ Header ParceRequest(int connection)
     	if (HDR.BodySize!=0)
     	{
     		HDR.HasBody=true;
-    		HDR.Body=std::string(buffer+Hdr.length()-HDR.BodySize,buffer+Hdr.length()+1);
-    		for (std::size_t i=HDR.Body.length();i>0;i--)
-				if (HDR.Body[i-1]=='}')
-				{
-					HDR.Body.resize(i);
-					break;
-				}
+    		HDR.Body=std::string(buffer+HdrEnd,buffer+Hdr.length());
+    		if (HDR.BodySize>(size_t)4096-HdrEnd)
+    		{
+    			char *BodyBuf=new char[HDR.BodySize-4095+HdrEnd];
+    			BodyBuf[HDR.BodySize-4096+HdrEnd]=0;
+    			ReadBytes(connection, BodyBuf, HDR.BodySize-4096+HdrEnd);
+    			HDR.Body.append(BodyBuf, &BodyBuf[HDR.BodySize-4095+HdrEnd]);
+#ifdef __DEBUG
+    			std::cerr<<"Got body without HTTP 100\n";
+#endif
+    			delete[] BodyBuf;
+    		}
     	}
     }
     else
     {
-    	if (HDR.BodySize==0) return Header (404,"Body size = 0. Expected Body size when expecting 100-continue.");
+    	if (HDR.BodySize==0) return Header (404,"Body size = 0. Expected Body size when HTTP 100-continue set.");
     	HDR.ExpectContinue=true;
     	char *BodyBuf=new char[HDR.BodySize+1];
-    	memset(BodyBuf,0,HDR.BodySize+1);
-#ifdef __DEBUG
-    	std::cerr<<"Buffer allocated: "<<HDR.BodySize+1<<" bytes \n";
-#endif
+    	BodyBuf[HDR.BodySize]=0;
     	sendToClient(connection, "HTTP/1.1 100 Continue\r\n\r\n", 26);
 #ifdef __DEBUG
     	std::cerr<<"HTTP/1.1 100 Continue sent\n";
 #endif
-    	readed=0;
-    	while(true)
-    	    {
-    	        std::size_t atual = ::read(connection, BodyBuf + readed, HDR.BodySize- readed -1);
-#ifdef __DEBUG
-    			std::cerr<<"Readed chunk: "<<atual<<" bytes, "<<readed+atual<<" bytes total \n";
-#endif
-    	        if (atual == 0)
-    	        {
-    	            break;
-    	        }
-    	        if ((int)atual == -1 && (errno == EAGAIN || errno == EINTR))
-    	        {
-    	            continue;
-    	        }
-    	        if ((int)atual == -1)
-    	        {
-    	            throw std::runtime_error("Read Error");
-    	        }
-    	        readed += atual;
-    	        if (readed == HDR.BodySize)
-    	        {
-    	            break;
-    	        }
-    	    // hackery but for this simple job ¯\(0_0)/¯
-    	        if ((readed > 3) && BodyBuf[readed - 3] == '\n' && BodyBuf [readed - 2] == '\r' && BodyBuf [readed - 1] == '\n')
-    	        {
-    	            break;
-    	        }
-    	    }
-#ifdef __DEBUG
-    	std::cerr<<"Readed: "<<readed<<" bytes total, allocated: "<<HDR.BodySize+1<<"\n";
-    	std::cerr<<"Last 50 bytes: "<<&BodyBuf[readed-50]<<std::endl;
-#endif
+    	ReadBytes(connection, BodyBuf, HDR.BodySize);
     	if (BodyBuf[readed-1]=='"')
 		{
-#ifdef __DEBUG
-    		std::cerr<<"Added '}' at^ "<<readed<<std::endl;
-#endif
+    		std::cerr<<"Added '}' at: "<<readed<<std::endl;
 			BodyBuf[readed++]='}';
 		}
     	HDR.Body.append(BodyBuf);
-#ifdef __DEBUG
-    	std::cerr<<"Body created: "<<HDR.Body.length()<<" chars \n";
-#endif
     	HDR.HasBody=true;
     	delete[] BodyBuf;
+    }
+    if (HDR.HasBody)
+    {
+    	if (HDR.Body.find("}",HDR.Body.length()-10)<0) HDR.Body+="}";
     }
     return HDR;
 }
@@ -376,19 +407,20 @@ void handleJob(std::unique_ptr<Job> job) {
     	job->Header+="Server: HSM module KG\r\n";
     	if (job->Body.length())
     	{
-    		job->Header+="Content-Length: "+std::to_string(job->Body.length()+2)+"\r\n\r\n";
-    		job->Header+="\r\n"+job->Body;
+    		job->Header+="Content-Length: "+std::to_string(job->Body.length())+"\r\nConnection: Closed\r\n\r\n";
+    		job->Body=job->Header+job->Body;
+    		sendToClient(job->sockfd, job->Body.data(), job->Body.length());
+    		//job->Header+=job->Body;
     	}
     	else
     	{
     		job->Header+="\r\n\r\n";
+    		sendToClient(job->sockfd, job->Header.data(), job->Header.length());
     	}
 
 #ifdef __DEBUG
     	std::cerr<<"Got responce\n-----------------------------------\n"<<job->Header<<"\n-----------------------------------\n"<<job->Body<<"\n-----------------------------------\n";
 #endif
-    	sendToClient(job->sockfd, job->Header.data(), job->Header.length());
-    	//if (job->Body.length()) sendToClient(job->sockfd, job->Body.data(), job->Body.length()+1);
     }
 }
 
@@ -404,7 +436,9 @@ int main()
     while ((connection = socket.waitForConnection())!=0)
     {
         Header H = ParceRequest(connection);
+#ifdef __DEBUG
         std::cerr<<H<<std::endl;
+#endif
         pending_futures.push_back(std::async(std::launch::async, handleJob, Respomces::getJob(connection,std::move(H))));
     }
 
