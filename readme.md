@@ -12,8 +12,11 @@ g++ -L/usr/lib/x86_64-linux-gnu/ -o "HSM_KG"  ./src/Base64.o ./src/Crypt.o ./src
 
 # 1. Method description
 ## Request a list of valid keys 
+
 This method is used for requesting a list of active keys. 
+
 ### Request
+
 **Table 1–Parameters**
 
 |Parameter  |Description                                 |
@@ -42,6 +45,7 @@ The JSON format of the request body is described in the table below (Table 3).
 |Request examle|
 |---------------------|
 |<ul>POST /keys HTTP/1.1<br> Content-Length 10<br> Accep: application/json<br> Content-Type: application/json;<br>charset=UTF-8<br> Host: localhost:8080<br><br> _{ "type": 1 }_</ul>|
+
 ### Responce
 When the request is successful, the server returns the HTTP code 200 and an array of key IDs. The JSON format of the response body is described in the table below (Table 5). 
 **Table 5 – JSON format of the response body**
@@ -49,6 +53,7 @@ When the request is successful, the server returns the HTTP code 200 and an arra
 |Field|Description|Type|Mandatory|
 |---------------|--------------|----------------------|-
 |keys|An array of identifiers of the keys in ASCII format. Each key ID (array element) is represented by a four-digit hexadecimal value|JSON array of string|Yes|
+
 An example of the response to the request is shown in the table below (see table 6). 
 **Table 6 – Response example**
 
@@ -63,9 +68,11 @@ An example of an error response to a request is shown in the table below (see ta
 |---|
 |<ul>HTTP 1.1 400 Bad Reques<br>t Content-Type: application/json;<br>charset=UTF-8<br> Content-Length: 33<br><br>_{<br> "errorCode": 106,<br> "errorText":"Wrong JSON object format" <br>}_</ul>|
 
-##Generate a symmetric verification code
+## Generate a symmetric verification code
  This method is intended for generating a symmetric verification code for an array of product identification codes. 
- ###Request
+ 
+ ### Request
+ 
  **Table 8 - Parameters**
 
 |Parameter|Description|
@@ -82,6 +89,7 @@ The HTTP request header parameters are shown in the table below (see Table 9).
 |Content-Length|Message body length in bytes|Number (integer)|Yes|
 
 The JSON format of the request body is described in the table below (Table 10). 
+
 **Table 10 – Description of the request body's JSON format**
 
 |Parameter|Description|Type|Mandatory|
@@ -98,7 +106,8 @@ The JSON format of the request body is described in the table below (Table 10).
 |--|
 |<ul>**POST** / sign/symmetric HTTP/1.1<br>**Content-Length:** 10<br>**Accept**: application/json<br>**Content-Type**: application/json;<br>**charset**=UTF-8<br>**Host**: localhost:8080 <br><br>_{ <br>"keys": "0002", <br>"blockCount": 4, <br>"blockLength": 6, <br>"imitoLength": 3, <br>"codes": " base64(КМ1 + КМ2 … КМn)"<br> _}</ul>
 
- ###Responce
+ ### Responce
+ 
  **Table 12 – JSON format of the response body**
 
 |Field|Description|Type|Mandatory|
@@ -107,11 +116,13 @@ The JSON format of the request body is described in the table below (Table 10).
 
 An example of the response to the request is shown in the table below (see table 13). 
 **Table 13 - Response example**
+
 |Response example|
 |--|
 |<ul>HTTP 1.1 200 OK <br>**Content-Type**: application/json;<br>**charset**=UTF-8<br>**Content-Length**: 540 <br><br>_{<br>"signatures": "QUJDREVGC...........==)" <br>}_</ul>|
+
 # Format and error codes
-##Error format
+## Error format
 The JSON format of the response body with error information is described in the table below (see table 13). HTTP code 400.
 **Table 13 - JSON format of the response with an error**
 
@@ -120,8 +131,10 @@ The JSON format of the response body with error information is described in the 
 |errorCode|Error code|Number (integer)|
 |errorText|Error description|string|
 
-##Error description 
+## Error description 
+
 The error codes in the request response are shown in the table below (table 14).
+
 **Table 14 - Error codes**
 
 |Error code|Error description|
