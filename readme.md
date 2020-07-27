@@ -3,8 +3,11 @@
 This project was created using Eclipse CDT. However, you can also compile it via the command line:
 
 g++ -std=c++17 -O3 -Wall -c -fmessage-length=0 -MMD -MP -MF"src/Base64.d" -MT"src/Base64.o" -o "src/Base64.o" "../src/Base64.cpp"
+
 g++ -std=c++17 -O3 -Wall -c -fmessage-length=0 -MMD -MP -MF"src/Crypt.d" -MT"src/Crypt.o" -o "src/Crypt.o" "../src/Crypt.cpp"
+
 g++ -std=c++17 -O3 -Wall -c -fmessage-length=0 -MMD -MP -MF"src/HSM_KG.d" -MT"src/HSM_KG.o" -o "src/HSM_KG.o" "../src/HSM_KG.cpp"
+
 g++ -L/usr/lib/x86_64-linux-gnu/ -o "HSM_KG"  ./src/Base64.o ./src/Crypt.o ./src/HSM_KG.o   -lgcrypt -lstdc++fs -lpthread
 
 # 1. Method description
