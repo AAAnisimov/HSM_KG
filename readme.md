@@ -1,4 +1,5 @@
 # Preface
+The main idea was to compare the speed of Java and C++ encryption algorithms. Moreover, this code uses only the standard Linux libraries to pass security checks.
 
 This project was created using Eclipse CDT. However, you can also compile it via the command line:
 
